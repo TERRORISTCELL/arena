@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  build:
+  build-mingw:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,27 +18,54 @@ jobs:
           sudo apt-get install -y cmake nasm mingw-w64
 
       - name: configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build-gnu -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake
 
       - name: build
-        run: cmake --build build -j$(nproc)
+        run: cmake --build build-gnu -j$(nproc)
 
       - name: check artifact
         run: |
-          test -f build/libarena.a
-          test -f build/arena_link_test.exe
+          test -f build-gnu/libarena.a
+          test -f build-gnu/arena_link_test.exe
 
       - name: check archive
         run: |
-          x86_64-w64-mingw32-objdump -f build/CMakeFiles/arena.dir/src/memory.cpp.obj | grep -q "pe-x86-64"
-          x86_64-w64-mingw32-nm build/libarena.a | grep -q " T arena_read_safe"
-          x86_64-w64-mingw32-nm build/libarena.a | grep -q " T arena_scan_signature_ex"
-          x86_64-w64-mingw32-nm build/libarena.a | grep -q " T arena_call_ret_spoofed_ex"
+          x86_64-w64-mingw32-objdump -f build-gnu/CMakeFiles/arena.dir/src/memory.cpp.obj | grep -q "pe-x86-64"
+          x86_64-w64-mingw32-nm build-gnu/libarena.a | grep -q " T arena_read_safe"
+          x86_64-w64-mingw32-nm build-gnu/libarena.a | grep -q " T arena_scan_signature_ex"
+          x86_64-w64-mingw32-nm build-gnu/libarena.a | grep -q " T arena_call_ret_spoofed_ex"
 
       - name: upload lib
         uses: actions/upload-artifact@v4
         with:
-          name: libarena-windows-x64
+          name: libarena-mingw-x64
           path: |
-            build/libarena.a
-            build/arena_link_test.exe
+            build-gnu/libarena.a
+            build-gnu/arena_link_test.exe
+
+  build-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: configure
+        run: cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=cmake/msvc.cmake
+
+      - name: build
+        run: cmake --build build-msvc --config Release -j
+
+      - name: check artifact
+        run: |
+          if (!(Test-Path build-msvc/Release/arena.lib)) { exit 1 }
+          if (!(Test-Path build-msvc/Release/arena_link_test.exe)) { exit 1 }
+
+      - name: upload lib
+        uses: actions/upload-artifact@v4
+        with:
+          name: libarena-msvc-x64
+          path: |
+            build-msvc/Release/arena.lib
+            build-msvc/Release/arena_link_test.exe
