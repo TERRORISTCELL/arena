@@ -1,9 +1,0 @@
-build/
-build-*/
-*.obj
-*.exe
-*.dll
-*.pdb
-*.user
-.vs/
-.idea/
