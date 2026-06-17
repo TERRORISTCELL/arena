@@ -329,9 +329,13 @@ extern "C" bool arena_spoof_init(uint8_t* module_base, uint32_t max_fakestack)
             const auto params = return_length / static_cast<int8_t>(sizeof(uintptr_t));
             const auto& address_array = proxy_clean_returns[return_length];
             const auto random_address = address_array.at(pseudo_random % address_array.size());
+            const auto entry_slots = 1u + static_cast<std::size_t>(params);
+
+            if (fakestack.size() + entry_slots > max_fakestack)
+                break;
 
             fakestack.push_back(random_address);
-            for (auto p = 0; p < params && fakestack.size() < max_fakestack; ++p)
+            for (auto p = 0; p < params; ++p)
                 fakestack.push_back(module_address + (custom_rand(10, 30) % image_size));
         }
 

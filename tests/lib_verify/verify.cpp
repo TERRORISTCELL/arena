@@ -222,54 +222,38 @@ static void test_spoof_fakestack_depth(uint32_t max_fakestack)
 {
     char label[128]{};
 
-    const wchar_t* const modules[] = { L"kernel32.dll", L"ntdll.dll", L"user32.dll" };
-    uint8_t* best_module = nullptr;
-    for (const wchar_t* name : modules) {
-        auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(name));
-        if (base && arena_spoof_init(base, 0)) {
-            best_module = base;
-            break;
-        }
-    }
-
-    if (!best_module) {
-        check(false, "fakestack depth test: could not find a usable module");
-        return;
-    }
-
     std::snprintf(
         label,
         sizeof(label),
-        "arena_spoof_init accepts max_fakestack=%u",
+        "spoof init with live fakestack depth %u supports two-arg calls",
         max_fakestack);
-    check(arena_spoof_init(best_module, max_fakestack), label);
+    check(init_spoof_module_for_arg_count(2, max_fakestack), label);
 
-    std::snprintf(
-        label,
-        sizeof(label),
-        "arena_spoof_init re-init to 0 after max_fakestack=%u",
-        max_fakestack);
-    check(arena_spoof_init(best_module, 0), label);
-
-    const uintptr_t args[] = { 3, 4 };
+    const uintptr_t args[] = { 10, 32 };
     bool crashed = false;
     uintptr_t result = 0;
     std::snprintf(
         label,
         sizeof(label),
-        "spoof call works after re-init from max_fakestack=%u",
+        "two-arg spoof call with live fakestack depth %u succeeds",
         max_fakestack);
     check(
         spoof_call_ex(reinterpret_cast<void*>(&add_two), args, 2, &result, &crashed),
         label);
-    check(!crashed, "call did not crash after fakestack re-init");
 
     std::snprintf(
         label,
         sizeof(label),
-        "spoof call returns 7 after re-init from max_fakestack=%u",
+        "two-arg spoof call with live fakestack depth %u did not crash",
         max_fakestack);
-    check(result == 7, label);
+    check(!crashed, label);
+
+    std::snprintf(
+        label,
+        sizeof(label),
+        "two-arg spoof call with live fakestack depth %u returns 42",
+        max_fakestack);
+    check(result == 42, label);
 }
 #endif
 
@@ -430,6 +414,18 @@ void test_spoof()
     test_spoof_fakestack_depth(16);
     test_spoof_fakestack_depth(64);
     test_spoof_fakestack_depth(256);
+
+    check(init_spoof_module_for_arg_count(6, 64), "spoof init with live fakestack depth 64 supports six-arg calls");
+    {
+        const uintptr_t args[] = { 1, 2, 3, 4, 5, 6 };
+        bool crashed = false;
+        uintptr_t result = 0;
+        check(
+            spoof_call_ex(reinterpret_cast<void*>(&sum_six), args, 6, &result, &crashed),
+            "six-arg spoof call with live fakestack depth 64 succeeds");
+        check(!crashed, "six-arg spoof call with live fakestack depth 64 did not crash");
+        check(result == 21, "six-arg spoof call with live fakestack depth 64 returns 21");
+    }
 #else
     check(false, "spoof call live tests require MSVC SEH wrapper on Windows");
 #endif
