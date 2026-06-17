@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
-if(NOT CMAKE_TOOLCHAIN_FILE)
+# Default to the MinGW cross toolchain only when cross-compiling from a non-Windows host.
+# On native Windows, use MSVC (or whatever generator/compiler the user selects).
+if(NOT WIN32 AND NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mingw-w64.cmake" CACHE FILEPATH "" FORCE)
 endif()
 
@@ -22,6 +24,10 @@ target_include_directories(arena
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+if(MSVC)
+    target_compile_definitions(arena PRIVATE NOMINMAX)
+endif()
+
 if(WIN32 OR CMAKE_CROSSCOMPILING)
     target_link_libraries(arena PUBLIC kernel32)
 endif()
@@ -32,6 +38,10 @@ set_target_properties(arena PROPERTIES
 
 add_executable(arena_link_test tests/link_test.cpp)
 target_link_libraries(arena_link_test PRIVATE arena)
+
+if(MSVC)
+    target_compile_definitions(arena_link_test PRIVATE NOMINMAX)
+endif()
 
 install(TARGETS arena ARCHIVE DESTINATION lib)
 install(FILES include/arena.h DESTINATION include)
