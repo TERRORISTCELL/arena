@@ -86,6 +86,129 @@ static uintptr_t sum_eight(
 }
 
 #if defined(_MSC_VER)
+#include <intrin.h>
+
+extern "C" size_t proxy_call_fakestack_size;
+
+static HMODULE g_last_spoof_module = nullptr;
+
+static bool spoof_call_ex(void* fn, const uintptr_t* args, size_t count, uintptr_t* out, bool* crashed);
+
+struct StackProbeResult;
+static void run_stack_probe_direct(StackProbeResult* out);
+static bool run_stack_probe_spoofed(StackProbeResult* out, bool* crashed);
+static void test_spoof_stack_walk(uint32_t max_fakestack);
+void test_spoof();
+
+static bool module_image_range(HMODULE module, uintptr_t* out_base, uintptr_t* out_end)
+{
+    if (!module)
+        return false;
+
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+        return false;
+
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+        reinterpret_cast<const uint8_t*>(module) + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE)
+        return false;
+
+    *out_base = reinterpret_cast<uintptr_t>(module);
+    *out_end = *out_base + nt->OptionalHeader.SizeOfImage;
+    return true;
+}
+
+static bool address_in_module(uintptr_t address, HMODULE module)
+{
+    uintptr_t base = 0;
+    uintptr_t end = 0;
+    if (!module_image_range(module, &base, &end))
+        return false;
+    return address >= base && address < end;
+}
+
+struct StackProbeResult {
+    uintptr_t return_address = 0;
+    uintptr_t backtrace[32]{};
+    unsigned backtrace_count = 0;
+    bool return_in_spoof_module = false;
+    bool return_in_self_module = false;
+    bool harness_in_backtrace = false;
+    unsigned spoof_module_stack_hits = 0;
+};
+
+static constexpr uintptr_t kHarnessFunctionBytes = 0x400;
+
+static bool address_in_harness(uintptr_t address)
+{
+    const uintptr_t markers[] = {
+        reinterpret_cast<uintptr_t>(&run_stack_probe_direct),
+        reinterpret_cast<uintptr_t>(&run_stack_probe_spoofed),
+        reinterpret_cast<uintptr_t>(&spoof_call_ex),
+        reinterpret_cast<uintptr_t>(&test_spoof_stack_walk),
+        reinterpret_cast<uintptr_t>(&test_spoof),
+    };
+
+    for (const uintptr_t marker : markers) {
+        if (address >= marker && address < marker + kHarnessFunctionBytes)
+            return true;
+    }
+
+    return false;
+}
+
+static uintptr_t stack_probe(uintptr_t ctx_ptr)
+{
+    auto* ctx = reinterpret_cast<StackProbeResult*>(ctx_ptr);
+    const HMODULE self_module = GetModuleHandleW(nullptr);
+    const HMODULE spoof_module = g_last_spoof_module;
+
+    auto* const ret_slot = reinterpret_cast<uintptr_t*>(_AddressOfReturnAddress());
+    ctx->return_address = ret_slot[0];
+    ctx->return_in_spoof_module = address_in_module(ctx->return_address, spoof_module);
+    ctx->return_in_self_module = address_in_module(ctx->return_address, self_module);
+
+    using RtlCaptureStackBackTraceFn = USHORT(WINAPI*)(ULONG, ULONG, PVOID*, PULONG);
+    const auto capture = reinterpret_cast<RtlCaptureStackBackTraceFn>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "RtlCaptureStackBackTrace"));
+    if (capture) {
+        ctx->backtrace_count = capture(
+            0,
+            static_cast<ULONG>(sizeof(ctx->backtrace) / sizeof(ctx->backtrace[0])),
+            reinterpret_cast<PVOID*>(ctx->backtrace),
+            nullptr);
+
+        for (unsigned i = 1; i < ctx->backtrace_count; ++i) {
+            if (address_in_harness(ctx->backtrace[i]))
+                ctx->harness_in_backtrace = true;
+        }
+    }
+
+    for (intptr_t offset = 1; offset <= 128; ++offset) {
+        if (address_in_module(ret_slot[-offset], spoof_module))
+            ++ctx->spoof_module_stack_hits;
+    }
+
+    return 1;
+}
+
+static void run_stack_probe_direct(StackProbeResult* out)
+{
+    *out = {};
+    (void)stack_probe(reinterpret_cast<uintptr_t>(out));
+}
+
+static bool run_stack_probe_spoofed(StackProbeResult* out, bool* crashed)
+{
+    *out = {};
+    const uintptr_t args[] = { reinterpret_cast<uintptr_t>(out) };
+    uintptr_t result = 0;
+    if (!spoof_call_ex(reinterpret_cast<void*>(&stack_probe), args, 1, &result, crashed))
+        return false;
+    return result == 1;
+}
+
 static bool spoof_call_ex(void* fn, const uintptr_t* args, size_t count, uintptr_t* out, bool* crashed)
 {
     *crashed = false;
@@ -181,6 +304,7 @@ static bool init_spoof_module_for_arg_count(size_t arg_count, uint32_t max_fakes
         if (arg_count >= 4 && result != ((arg_count * (arg_count + 1)) / 2))
             continue;
 
+        g_last_spoof_module = reinterpret_cast<HMODULE>(base);
         return true;
     }
 
@@ -254,6 +378,64 @@ static void test_spoof_fakestack_depth(uint32_t max_fakestack)
         "two-arg spoof call with live fakestack depth %u returns 42",
         max_fakestack);
     check(result == 42, label);
+}
+
+static void test_spoof_stack_walk(uint32_t max_fakestack)
+{
+    char label[128]{};
+
+    std::snprintf(
+        label,
+        sizeof(label),
+        "spoof init for stack-walk test at fakestack depth %u",
+        max_fakestack);
+    check(init_spoof_module_for_arg_count(0, max_fakestack), label);
+
+    StackProbeResult direct{};
+    run_stack_probe_direct(&direct);
+
+    check(direct.return_in_self_module, "direct call return address is in self module");
+    check(direct.harness_in_backtrace, "direct call backtrace reaches test harness");
+
+    StackProbeResult spoofed{};
+    bool crashed = false;
+    std::snprintf(
+        label,
+        sizeof(label),
+        "spoofed stack probe succeeds at fakestack depth %u",
+        max_fakestack);
+    check(run_stack_probe_spoofed(&spoofed, &crashed), label);
+    check(!crashed, "spoofed stack probe did not crash");
+
+    std::snprintf(
+        label,
+        sizeof(label),
+        "spoofed return address is in spoof module (fakestack %u)",
+        max_fakestack);
+    check(spoofed.return_in_spoof_module, label);
+
+    std::snprintf(
+        label,
+        sizeof(label),
+        "spoofed return address is not in self module (fakestack %u)",
+        max_fakestack);
+    check(!spoofed.return_in_self_module, label);
+
+    std::snprintf(
+        label,
+        sizeof(label),
+        "spoofed backtrace does not reach test harness (fakestack %u)",
+        max_fakestack);
+    check(!spoofed.harness_in_backtrace, label);
+
+    if (max_fakestack > 0) {
+        std::snprintf(
+            label,
+            sizeof(label),
+            "fakestack depth %u leaves spoof-module addresses on stack",
+            max_fakestack);
+        check(spoofed.spoof_module_stack_hits > 0, label);
+    }
 }
 #endif
 
@@ -426,6 +608,9 @@ void test_spoof()
         check(!crashed, "six-arg spoof call with live fakestack depth 64 did not crash");
         check(result == 21, "six-arg spoof call with live fakestack depth 64 returns 21");
     }
+
+    test_spoof_stack_walk(0);
+    test_spoof_stack_walk(64);
 #else
     check(false, "spoof call live tests require MSVC SEH wrapper on Windows");
 #endif
