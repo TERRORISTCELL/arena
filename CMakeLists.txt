@@ -43,5 +43,13 @@ if(MSVC)
     target_compile_definitions(arena_link_test PRIVATE NOMINMAX)
 endif()
 
+add_executable(arena_lib_verify tests/lib_verify/verify.cpp)
+target_link_libraries(arena_lib_verify PRIVATE arena)
+
+if(MSVC)
+    target_compile_definitions(arena_lib_verify PRIVATE NOMINMAX)
+    target_compile_options(arena_lib_verify PRIVATE /EHa)
+endif()
+
 install(TARGETS arena ARCHIVE DESTINATION lib)
 install(FILES include/arena.h DESTINATION include)
