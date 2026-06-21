@@ -146,6 +146,22 @@ static bool address_in_harness(uintptr_t address)
         reinterpret_cast<uintptr_t>(&run_stack_probe_direct),
         reinterpret_cast<uintptr_t>(&run_stack_probe_spoofed),
         reinterpret_cast<uintptr_t>(&spoof_call_ex),
+        reinterpret_cast<uintptr_t>(&stack_probe),
+        reinterpret_cast<uintptr_t>(&test_spoof_stack_walk),
+        reinterpret_cast<uintptr_t>(&test_spoof),
+    };
+
+    for (const uintptr_t marker : markers) {
+        if (address >= marker && address < marker + kHarnessFunctionBytes)
+            return true;
+    }
+
+    return false;
+}
+
+static bool address_in_test_entry_harness(uintptr_t address)
+{
+    const uintptr_t markers[] = {
         reinterpret_cast<uintptr_t>(&test_spoof_stack_walk),
         reinterpret_cast<uintptr_t>(&test_spoof),
     };
@@ -180,7 +196,7 @@ static uintptr_t stack_probe(uintptr_t ctx_ptr)
             nullptr);
 
         for (unsigned i = 1; i < ctx->backtrace_count; ++i) {
-            if (address_in_harness(ctx->backtrace[i]))
+            if (address_in_test_entry_harness(ctx->backtrace[i]))
                 ctx->harness_in_backtrace = true;
         }
     }
