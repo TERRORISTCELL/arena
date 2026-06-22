@@ -1,7 +1,7 @@
 #include "arena.h"
-
 #include "error.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 
 #include <algorithm>
@@ -424,6 +424,63 @@ extern "C" bool arena_call_ret_spoofed_ex(void* fn, const uintptr_t* args, size_
     arena::clear_error();
     return true;
 }
+#else
+// Linux implementation - executes direct call
+extern "C" bool arena_spoof_init(uint8_t* module_base, uint32_t max_fakestack)
+{
+    // Return-address spoofing is Windows-specific.
+    // On Linux, we initialize successfully and execute calls directly.
+    return true;
+}
+
+extern "C" bool arena_call_ret_spoofed_ex(void* fn, const uintptr_t* args, size_t count, uintptr_t* out_return)
+{
+    arena::clear_error();
+
+    if (!out_return) {
+        arena::set_error("missing spoof call output");
+        return false;
+    }
+
+    *out_return = 0;
+
+    if (!fn) {
+        arena::set_error("spoof call target is null");
+        return false;
+    }
+
+    if (count > 0 && !args) {
+        arena::set_error("spoof call args are null");
+        return false;
+    }
+
+    typedef uintptr_t (*Func0)();
+    typedef uintptr_t (*Func1)(uintptr_t);
+    typedef uintptr_t (*Func2)(uintptr_t, uintptr_t);
+    typedef uintptr_t (*Func3)(uintptr_t, uintptr_t, uintptr_t);
+    typedef uintptr_t (*Func4)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+    typedef uintptr_t (*Func5)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+    typedef uintptr_t (*Func6)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+    typedef uintptr_t (*Func7)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+    typedef uintptr_t (*Func8)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
+    switch (count) {
+    case 0: *out_return = ((Func0)fn)(); break;
+    case 1: *out_return = ((Func1)fn)(args[0]); break;
+    case 2: *out_return = ((Func2)fn)(args[0], args[1]); break;
+    case 3: *out_return = ((Func3)fn)(args[0], args[1], args[2]); break;
+    case 4: *out_return = ((Func4)fn)(args[0], args[1], args[2], args[3]); break;
+    case 5: *out_return = ((Func5)fn)(args[0], args[1], args[2], args[3], args[4]); break;
+    case 6: *out_return = ((Func6)fn)(args[0], args[1], args[2], args[3], args[4], args[5]); break;
+    case 7: *out_return = ((Func7)fn)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]); break;
+    case 8: *out_return = ((Func8)fn)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]); break;
+    default:
+        arena::set_error("spoof call supports at most 8 arguments");
+        return false;
+    }
+    return true;
+}
+#endif
 
 extern "C" uintptr_t arena_call_ret_spoofed(void* fn, const uintptr_t* args, size_t count)
 {

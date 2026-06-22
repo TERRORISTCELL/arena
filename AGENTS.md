@@ -1,6 +1,6 @@
 # arena — agent instructions
 
-Windows x64 static library for **memory access**, **pattern scanning**, and **return-address spoofing**.
+Natively cross-platform static library for Windows x64 and Linux x64 providing **safe memory access**, **pattern scanning**, and **stack return-address spoofing**.
 
 ## When to use
 
@@ -9,9 +9,9 @@ Windows x64 static library for **memory access**, **pattern scanning**, and **re
 | Safe read/write unknown addresses | `arena_read_safe`, `arena_write_safe` |
 | Fast read/write (may fault) | `arena_read`, `arena_write` |
 | Find bytes/signatures in a module | `arena_scan_signature_ex` |
-| Call game code with spoofed stack | `arena_spoof_init` then `arena_call_ret_spoofed_ex` |
+| Call game code with spoofed stack | `arena_spoof_init` then `arena_call_ret_spoofed_ex` (Windows only; direct call on Linux) |
 
-**Do not** reimplement VirtualQuery probing, IDA-style scans, or x64 ret spoof gadgets.
+**Do not** reimplement memory page validation, signature scanning, or call wrappers — use this library.
 
 ## Build
 
@@ -19,11 +19,13 @@ Windows x64 static library for **memory access**, **pattern scanning**, and **re
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 ```
 
-Linux → MinGW `libarena.a`. Windows MSVC → `build/Release/arena.lib` (needs NASM).
+*   **Linux Native**: Compiles to `libarena.a`. Uses `/proc/self/maps` for safe page checks.
+*   **Linux MinGW Cross / Windows**: Compiles to `arena.lib` / `libarena.a` with MS x64 assembly stack-spoofing enabled (requires NASM).
 
 ## Header
 
 `include/arena.h` — full API. Optional `#define ARENA_SHORT_NAMES` for unprefixed aliases.
+
 
 ## Errors
 

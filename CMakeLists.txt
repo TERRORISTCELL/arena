@@ -6,18 +6,33 @@ if(NOT WIN32 AND NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mingw-w64.cmake" CACHE FILEPATH "" FORCE)
 endif()
 
-project(arena C CXX ASM_NASM)
+project(arena C CXX)
+
+if(WIN32 OR CMAKE_CROSSCOMPILING)
+    enable_language(ASM_NASM)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(arena STATIC
+set(ARENA_SOURCES
     src/error.cpp
-    src/memory.cpp
     src/scan.cpp
     src/spoof.cpp
-    asm/ret.nasm
 )
+
+if(WIN32 OR CMAKE_CROSSCOMPILING)
+    list(APPEND ARENA_SOURCES
+        src/memory_win32.cpp
+        asm/ret.nasm
+    )
+else()
+    list(APPEND ARENA_SOURCES
+        src/memory_linux.cpp
+    )
+endif()
+
+add_library(arena STATIC ${ARENA_SOURCES})
 
 target_include_directories(arena
     PUBLIC  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -43,12 +58,14 @@ if(MSVC)
     target_compile_definitions(arena_link_test PRIVATE NOMINMAX)
 endif()
 
-add_executable(arena_lib_verify tests/lib_verify/verify.cpp)
-target_link_libraries(arena_lib_verify PRIVATE arena)
+if(WIN32 OR CMAKE_CROSSCOMPILING)
+    add_executable(arena_lib_verify tests/lib_verify/verify.cpp)
+    target_link_libraries(arena_lib_verify PRIVATE arena)
 
-if(MSVC)
-    target_compile_definitions(arena_lib_verify PRIVATE NOMINMAX)
-    target_compile_options(arena_lib_verify PRIVATE /EHa)
+    if(MSVC)
+        target_compile_definitions(arena_lib_verify PRIVATE NOMINMAX)
+        target_compile_options(arena_lib_verify PRIVATE /EHa)
+    endif()
 endif()
 
 install(TARGETS arena ARCHIVE DESTINATION lib)
