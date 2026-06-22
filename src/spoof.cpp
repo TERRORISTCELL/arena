@@ -1,5 +1,6 @@
 #include "arena.h"
 #include "error.hpp"
+#include <string>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -425,11 +426,88 @@ extern "C" bool arena_call_ret_spoofed_ex(void* fn, const uintptr_t* args, size_
     return true;
 }
 #else
-// Linux implementation - executes direct call
+#include <elf.h>
+#include <link.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <algorithm>
+#include <vector>
+
+// Forward declare the System V assembly spoof stub
+extern "C" uintptr_t arena_call_sysv_spoof(
+    void* fn,
+    const uintptr_t* args,
+    size_t count,
+    uintptr_t gadget_jmp,
+    uintptr_t gadget_ret
+);
+
+namespace {
+
+uintptr_t g_gadget_jmp = 0;
+uintptr_t g_gadget_ret = 0;
+bool g_linux_spoof_ready = false;
+
+// Scan loaded ELF segment regions for gadgets:
+// gadget_jmp: a direct jump: "jmp r10" -> "41 FF E2" or "jmp *%r10"
+// gadget_ret: a standard return instruction: "ret" -> "C3"
+int find_elf_gadgets_callback(struct dl_phdr_info* info, size_t size, void* data)
+{
+    (void)size;
+    (void)data;
+
+    // Avoid scanning self main binary if possible, search inside shared libs (like libc.so)
+    std::string name = info->dlpi_name;
+    if (name.find("libc.so") == std::string::npos) {
+        return 0; // Keep searching until we hit libc
+    }
+
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        // Only scan executable program segments
+        if (info->dlpi_phdr[i].p_type == PT_LOAD && (info->dlpi_phdr[i].p_flags & PF_X)) {
+            uint8_t* start = reinterpret_cast<uint8_t*>(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
+            size_t len = info->dlpi_phdr[i].p_memsz;
+
+            // Search for:
+            // 1. "jmp r10" -> \x41\xFF\xE2
+            // 2. "ret" -> \xC3
+            for (size_t j = 0; j < len - 3; j++) {
+                if (!g_gadget_jmp && start[j] == 0x41 && start[j+1] == 0xFF && start[j+2] == 0xE2) {
+                    g_gadget_jmp = reinterpret_cast<uintptr_t>(start + j);
+                }
+                if (!g_gadget_ret && start[j] == 0xC3) {
+                    g_gadget_ret = reinterpret_cast<uintptr_t>(start + j);
+                }
+                if (g_gadget_jmp && g_gadget_ret) {
+                    return 1; // Done searching!
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
 extern "C" bool arena_spoof_init(uint8_t* module_base, uint32_t max_fakestack)
 {
-    // Return-address spoofing is Windows-specific.
-    // On Linux, we initialize successfully and execute calls directly.
+    (void)module_base;
+    (void)max_fakestack;
+    
+    arena::clear_error();
+    g_gadget_jmp = 0;
+    g_gadget_ret = 0;
+    g_linux_spoof_ready = false;
+
+    // Scan shared library memory images (e.g. libc) to resolve gadgets
+    dl_iterate_phdr(find_elf_gadgets_callback, nullptr);
+
+    if (!g_gadget_jmp || !g_gadget_ret) {
+        arena::set_error("failed to find suitable return/jump gadgets in loaded ELF binaries");
+        return false;
+    }
+
+    g_linux_spoof_ready = true;
     return true;
 }
 
@@ -454,30 +532,18 @@ extern "C" bool arena_call_ret_spoofed_ex(void* fn, const uintptr_t* args, size_
         return false;
     }
 
-    typedef uintptr_t (*Func0)();
-    typedef uintptr_t (*Func1)(uintptr_t);
-    typedef uintptr_t (*Func2)(uintptr_t, uintptr_t);
-    typedef uintptr_t (*Func3)(uintptr_t, uintptr_t, uintptr_t);
-    typedef uintptr_t (*Func4)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-    typedef uintptr_t (*Func5)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-    typedef uintptr_t (*Func6)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-    typedef uintptr_t (*Func7)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-    typedef uintptr_t (*Func8)(uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t, uintptr_t);
-
-    switch (count) {
-    case 0: *out_return = ((Func0)fn)(); break;
-    case 1: *out_return = ((Func1)fn)(args[0]); break;
-    case 2: *out_return = ((Func2)fn)(args[0], args[1]); break;
-    case 3: *out_return = ((Func3)fn)(args[0], args[1], args[2]); break;
-    case 4: *out_return = ((Func4)fn)(args[0], args[1], args[2], args[3]); break;
-    case 5: *out_return = ((Func5)fn)(args[0], args[1], args[2], args[3], args[4]); break;
-    case 6: *out_return = ((Func6)fn)(args[0], args[1], args[2], args[3], args[4], args[5]); break;
-    case 7: *out_return = ((Func7)fn)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]); break;
-    case 8: *out_return = ((Func8)fn)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]); break;
-    default:
+    if (count > 8) {
         arena::set_error("spoof call supports at most 8 arguments");
         return false;
     }
+
+    if (!g_linux_spoof_ready) {
+        arena::set_error("spoof is not initialized or gadgets not found");
+        return false;
+    }
+
+    // Call System V ABI return spoof stub
+    *out_return = arena_call_sysv_spoof(fn, args, count, g_gadget_jmp, g_gadget_ret);
     return true;
 }
 #endif

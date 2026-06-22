@@ -27,8 +27,10 @@ if(WIN32 OR CMAKE_CROSSCOMPILING)
         asm/ret.nasm
     )
 else()
+    enable_language(ASM)
     list(APPEND ARENA_SOURCES
         src/memory_linux.cpp
+        asm/ret_linux.S
     )
 endif()
 

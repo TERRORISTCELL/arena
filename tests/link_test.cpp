@@ -25,14 +25,22 @@ int main()
     if (!arena_write_safe(reinterpret_cast<uintptr_t>(&writable), &value, sizeof(value)))
         return 3;
 
+    if (!arena_spoof_init(nullptr, 64))
+        return 4;
+
     uintptr_t typed_result = 0;
-    (void)arena::call_ret_spoofed<uintptr_t>(
+    if (!arena::call_ret_spoofed<uintptr_t>(
         reinterpret_cast<void*>(&add_two),
         &typed_result,
-        static_cast<uintptr_t>(1),
-        static_cast<uintptr_t>(2));
+        static_cast<uintptr_t>(5),
+        static_cast<uintptr_t>(10)))
+    {
+        return 5;
+    }
 
-    (void)arena_spoof_init;
+    if (typed_result != 15)
+        return 6;
+
     (void)arena_call_ret_spoofed_ex;
     (void)arena_call_ret_spoofed;
     (void)arena_last_error;
