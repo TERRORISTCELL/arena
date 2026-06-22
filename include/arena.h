@@ -92,6 +92,16 @@ ARENA_API uintptr_t arena_scan_signature(
 /* Retrieves the last thread-local error code for this thread. */
 ARENA_API uint32_t arena_last_error(void);
 
+/* -----------------------------------------------------------------------
+ * Pattern result cache (optional, not thread-safe).
+ * Call arena_cache_init() once before first use.
+ * ----------------------------------------------------------------------- */
+ARENA_API bool  arena_cache_init(void);
+ARENA_API bool  arena_cache_lookup(const char* pattern, uintptr_t* out_value);
+ARENA_API void  arena_cache_store(const char* pattern, uintptr_t value);
+ARENA_API void  arena_cache_flush(void);
+ARENA_API void  arena_cache_destroy(void);
+
 #ifdef __cplusplus
 }
 
