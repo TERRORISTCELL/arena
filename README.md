@@ -11,7 +11,7 @@ exports:
 - `arena_call_ret_spoofed` convenience wrapper that returns 0 on failure.
 - `arena_scan_signature_ex` pattern scan on a `(base, size)` range with resolve kind.
 - `arena_scan_signature` convenience wrapper that returns 0 on failure.
-- `arena_last_error` last failure message for this thread.
+- `arena_last_error` last failure code (thread-local 32-bit integer, see [ERRORS.md](file:///home/iay/Belgeler/libs/arena/ERRORS.md)).
 
 resolve kinds: `ARENA_RESOLVE_DIRECT_RVA`, `ARENA_RESOLVE_RIP_RELATIVE32`, `ARENA_RESOLVE_MATCH_ADDRESS`, `ARENA_RESOLVE_ABS32`, `ARENA_RESOLVE_ABS64`, `ARENA_RESOLVE_MATCH_RVA_PLUS_OFFSET`.
 

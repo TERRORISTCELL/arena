@@ -1,5 +1,6 @@
 #include "arena.h"
 #include "error.hpp"
+#include "errors.h"
 #include <string>
 
 #ifdef _WIN32
@@ -113,18 +114,18 @@ void reset_spoof_state()
 bool validate_pe_image(uint8_t* module_base, IMAGE_NT_HEADERS** out_nt)
 {
     if (!module_base) {
-        arena::set_error("module base is null");
+        arena::set_error(ARENA_E_SPOOF_BASE_NULL);
         return false;
     }
 
     if (!readable_range(module_base, sizeof(IMAGE_DOS_HEADER))) {
-        arena::set_error("module DOS header is not readable");
+        arena::set_error(ARENA_E_SPOOF_DOS_READ);
         return false;
     }
 
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module_base);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
-        arena::set_error("invalid DOS signature");
+        arena::set_error(ARENA_E_SPOOF_DOS_SIG);
         return false;
     }
 
@@ -134,38 +135,38 @@ bool validate_pe_image(uint8_t* module_base, IMAGE_NT_HEADERS** out_nt)
         dos->e_lfanew > kMaxPeHeaderOffset ||
         module_address > UINTPTR_MAX - pe_offset ||
         module_address + pe_offset > UINTPTR_MAX - sizeof(IMAGE_NT_HEADERS)) {
-        arena::set_error("invalid PE header offset");
+        arena::set_error(ARENA_E_SPOOF_PE_OFFSET);
         return false;
     }
 
     auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(module_base + dos->e_lfanew);
     if (!readable_range(nt, sizeof(IMAGE_NT_HEADERS))) {
-        arena::set_error("module NT header is not readable");
+        arena::set_error(ARENA_E_SPOOF_NT_READ);
         return false;
     }
 
     if (nt->Signature != IMAGE_NT_SIGNATURE) {
-        arena::set_error("invalid NT signature");
+        arena::set_error(ARENA_E_SPOOF_NT_SIG);
         return false;
     }
 
     if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64) {
-        arena::set_error("module is not x64");
+        arena::set_error(ARENA_E_SPOOF_NOT_X64);
         return false;
     }
 
     if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        arena::set_error("module is not PE32+");
+        arena::set_error(ARENA_E_SPOOF_NOT_PE32);
         return false;
     }
 
     if (nt->OptionalHeader.SizeOfImage == 0) {
-        arena::set_error("module SizeOfImage is zero");
+        arena::set_error(ARENA_E_SPOOF_IMAGE_SIZE);
         return false;
     }
 
     if (nt->FileHeader.NumberOfSections == 0 || nt->FileHeader.NumberOfSections > 96) {
-        arena::set_error("invalid section count");
+        arena::set_error(ARENA_E_SPOOF_SECTION_COUNT);
         return false;
     }
 
@@ -173,7 +174,7 @@ bool validate_pe_image(uint8_t* module_base, IMAGE_NT_HEADERS** out_nt)
         static_cast<std::size_t>(nt->FileHeader.NumberOfSections) * sizeof(IMAGE_SECTION_HEADER);
     const auto* section = IMAGE_FIRST_SECTION(nt);
     if (!readable_range(section, section_bytes)) {
-        arena::set_error("section table is not readable");
+        arena::set_error(ARENA_E_SPOOF_SECTION_READ);
         return false;
     }
 
@@ -222,7 +223,7 @@ extern "C" bool arena_spoof_init(uint8_t* module_base, uint32_t max_fakestack)
         const auto module_address = reinterpret_cast<uintptr_t>(module_base);
         uintptr_t module_end{};
         if (!add_size(module_address, image_size, &module_end)) {
-            arena::set_error("module image range overflows");
+            arena::set_error(ARENA_E_SPOOF_RANGE_OVERFLOW);
             return false;
         }
 
@@ -319,7 +320,7 @@ extern "C" bool arena_spoof_init(uint8_t* module_base, uint32_t max_fakestack)
 
         std::size_t minimum_slot{};
         if (!required_return_slot(0, &minimum_slot) || !g_return_slot_ready[minimum_slot]) {
-            arena::set_error("required spoof return slot was not found");
+            arena::set_error(ARENA_E_SPOOF_RETURN_SLOT_NOT_FOUND);
             reset_spoof_state();
             return false;
         }
@@ -350,7 +351,7 @@ extern "C" bool arena_spoof_init(uint8_t* module_base, uint32_t max_fakestack)
         return true;
     } catch (...) {
         reset_spoof_state();
-        arena::set_error("spoof init failed");
+        arena::set_error(ARENA_E_SPOOF_INIT_FAILED);
         return false;
     }
 }
@@ -360,30 +361,30 @@ extern "C" bool arena_call_ret_spoofed_ex(void* fn, const uintptr_t* args, size_
     arena::clear_error();
 
     if (!out_return) {
-        arena::set_error("missing spoof call output");
+        arena::set_error(ARENA_E_SPOOF_MISSING_OUTPUT);
         return false;
     }
 
     *out_return = 0;
 
     if (!fn) {
-        arena::set_error("spoof call target is null");
+        arena::set_error(ARENA_E_SPOOF_TARGET_NULL);
         return false;
     }
 
     if (count > 0 && !args) {
-        arena::set_error("spoof call args are null");
+        arena::set_error(ARENA_E_SPOOF_ARGS_NULL);
         return false;
     }
 
     std::size_t slot{};
     if (!required_return_slot(count, &slot)) {
-        arena::set_error("spoof call supports at most 8 arguments");
+        arena::set_error(ARENA_E_SPOOF_TOO_MANY_ARGS);
         return false;
     }
 
     if (!g_spoof_ready || !g_return_slot_ready[slot] || proxy_call_returns[slot] == 0) {
-        arena::set_error("required spoof return slot is not initialized");
+        arena::set_error(ARENA_E_SPOOF_SLOT_NOT_INIT);
         return false;
     }
 
@@ -418,7 +419,7 @@ extern "C" bool arena_call_ret_spoofed_ex(void* fn, const uintptr_t* args, size_
         *out_return = reinterpret_cast<Spoof8>(stub)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], kSpoofSentinel, fn);
         break;
     default:
-        arena::set_error("spoof call supports at most 8 arguments");
+        arena::set_error(ARENA_E_SPOOF_TOO_MANY_ARGS);
         return false;
     }
 
@@ -503,7 +504,7 @@ extern "C" bool arena_spoof_init(uint8_t* module_base, uint32_t max_fakestack)
     dl_iterate_phdr(find_elf_gadgets_callback, nullptr);
 
     if (!g_gadget_jmp || !g_gadget_ret) {
-        arena::set_error("failed to find suitable return/jump gadgets in loaded ELF binaries");
+        arena::set_error(ARENA_E_SPOOF_GADGETS_NOT_FOUND);
         return false;
     }
 
@@ -516,29 +517,29 @@ extern "C" bool arena_call_ret_spoofed_ex(void* fn, const uintptr_t* args, size_
     arena::clear_error();
 
     if (!out_return) {
-        arena::set_error("missing spoof call output");
+        arena::set_error(ARENA_E_SPOOF_MISSING_OUTPUT);
         return false;
     }
 
     *out_return = 0;
 
     if (!fn) {
-        arena::set_error("spoof call target is null");
+        arena::set_error(ARENA_E_SPOOF_TARGET_NULL);
         return false;
     }
 
     if (count > 0 && !args) {
-        arena::set_error("spoof call args are null");
+        arena::set_error(ARENA_E_SPOOF_ARGS_NULL);
         return false;
     }
 
     if (count > 8) {
-        arena::set_error("spoof call supports at most 8 arguments");
+        arena::set_error(ARENA_E_SPOOF_TOO_MANY_ARGS);
         return false;
     }
 
     if (!g_linux_spoof_ready) {
-        arena::set_error("spoof is not initialized or gadgets not found");
+        arena::set_error(ARENA_E_SPOOF_NOT_INIT);
         return false;
     }
 

@@ -1,6 +1,7 @@
 #include "arena.h"
 
 #include "error.hpp"
+#include "errors.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -72,14 +73,14 @@ bool compile_pattern(std::string_view pattern, CompiledPattern* out)
 
         std::uint8_t value{};
         if (!parse_byte(token, &value)) {
-            arena::set_error("invalid pattern token");
+            arena::set_error(ARENA_E_SCAN_INVALID_TOKEN);
             return false;
         }
         out->bytes.push_back(static_cast<int>(value));
     }
 
     if (out->bytes.empty()) {
-        arena::set_error("empty pattern");
+        arena::set_error(ARENA_E_SCAN_EMPTY_PATTERN);
         return false;
     }
 
@@ -108,7 +109,7 @@ bool compile_pattern(std::string_view pattern, CompiledPattern* out)
     }
 
     if (best_length == 0) {
-        arena::set_error("pattern is all wildcards");
+        arena::set_error(ARENA_E_SCAN_ALL_WILDCARDS);
         return false;
     }
 
@@ -202,7 +203,7 @@ bool resolve_match(
     uintptr_t* out)
 {
     if (match_offset > UINTPTR_MAX - base) {
-        arena::set_error("match address overflow");
+        arena::set_error(ARENA_E_SCAN_ADDR_OVERFLOW);
         return false;
     }
 
@@ -219,23 +220,23 @@ bool resolve_match(
 
     case ARENA_RESOLVE_MATCH_RVA_PLUS_OFFSET:
         if (!params) {
-            arena::set_error("rva-plus-offset resolve requires params");
+            arena::set_error(ARENA_E_SCAN_RVA_PARAMS);
             return false;
         }
         if (!add_signed_offset(match_offset, params->extra_offset, out)) {
-            arena::set_error("rva-plus-offset result overflow");
+            arena::set_error(ARENA_E_SCAN_RVA_OVERFLOW);
             return false;
         }
         return true;
 
     case ARENA_RESOLVE_RIP_RELATIVE32: {
         if (!params) {
-            arena::set_error("rip-relative resolve requires params");
+            arena::set_error(ARENA_E_SCAN_RIP_PARAMS);
             return false;
         }
 
         if (!has_displaced_bytes(match_offset, params->displacement_offset, sizeof(std::int32_t), image_size)) {
-            arena::set_error("rip displacement out of range");
+            arena::set_error(ARENA_E_SCAN_RIP_DISPLACEMENT);
             return false;
         }
 
@@ -244,13 +245,13 @@ bool resolve_match(
 
         uintptr_t next{};
         if (match_address > UINTPTR_MAX - params->instruction_length) {
-            arena::set_error("rip next address overflow");
+            arena::set_error(ARENA_E_SCAN_RIP_NEXT_OVERFLOW);
             return false;
         }
 
         next = match_address + params->instruction_length;
         if (!add_signed_offset(next, displacement, out)) {
-            arena::set_error("invalid rip-relative target");
+            arena::set_error(ARENA_E_SCAN_RIP_TARGET_INVALID);
             return false;
         }
         return true;
@@ -258,19 +259,19 @@ bool resolve_match(
 
     case ARENA_RESOLVE_ABS32: {
         if (!params) {
-            arena::set_error("abs32 resolve requires params");
+            arena::set_error(ARENA_E_SCAN_ABS32_PARAMS);
             return false;
         }
 
         if (!has_displaced_bytes(match_offset, params->displacement_offset, sizeof(std::uint32_t), image_size)) {
-            arena::set_error("abs32 displacement out of range");
+            arena::set_error(ARENA_E_SCAN_ABS32_DISPLACEMENT);
             return false;
         }
 
         std::uint32_t value{};
         std::memcpy(&value, image + match_offset + params->displacement_offset, sizeof(value));
         if (base > UINTPTR_MAX - value) {
-            arena::set_error("abs32 target overflow");
+            arena::set_error(ARENA_E_SCAN_ABS32_OVERFLOW);
             return false;
         }
         *out = base + value;
@@ -279,19 +280,19 @@ bool resolve_match(
 
     case ARENA_RESOLVE_ABS64: {
         if (!params) {
-            arena::set_error("abs64 resolve requires params");
+            arena::set_error(ARENA_E_SCAN_ABS64_PARAMS);
             return false;
         }
 
         if (!has_displaced_bytes(match_offset, params->displacement_offset, sizeof(std::uint64_t), image_size)) {
-            arena::set_error("abs64 displacement out of range");
+            arena::set_error(ARENA_E_SCAN_ABS64_DISPLACEMENT);
             return false;
         }
 
         std::uint64_t value{};
         std::memcpy(&value, image + match_offset + params->displacement_offset, sizeof(value));
         if (value > UINTPTR_MAX) {
-            arena::set_error("abs64 target out of range");
+            arena::set_error(ARENA_E_SCAN_ABS64_OVERFLOW);
             return false;
         }
         *out = static_cast<uintptr_t>(value);
@@ -299,7 +300,7 @@ bool resolve_match(
     }
     }
 
-    arena::set_error("unknown resolve kind");
+    arena::set_error(ARENA_E_SCAN_UNKNOWN_KIND);
     return false;
 }
 
@@ -316,14 +317,14 @@ extern "C" bool arena_scan_signature_ex(
     arena::clear_error();
 
     if (!base || !pattern || !out_result || size == 0) {
-        arena::set_error("invalid scan input");
+        arena::set_error(ARENA_E_SCAN_INVALID_INPUT);
         return false;
     }
 
     try {
         const auto base_address = reinterpret_cast<uintptr_t>(base);
         if (size > UINTPTR_MAX - base_address) {
-            arena::set_error("scan range overflows");
+            arena::set_error(ARENA_E_SCAN_RANGE_OVERFLOW);
             return false;
         }
 
@@ -335,7 +336,7 @@ extern "C" bool arena_scan_signature_ex(
         const auto matches = find_matches(image, size, compiled);
 
         if (matches.empty()) {
-            arena::set_error("pattern not found");
+            arena::set_error(ARENA_E_SCAN_NOT_FOUND);
             return false;
         }
 
@@ -363,7 +364,7 @@ extern "C" bool arena_scan_signature_ex(
         });
 
         if (!all_same) {
-            arena::set_error("pattern matched multiple locations with different targets");
+            arena::set_error(ARENA_E_SCAN_MULTIPLE_MATCHES);
             return false;
         }
 
@@ -371,7 +372,7 @@ extern "C" bool arena_scan_signature_ex(
         arena::clear_error();
         return true;
     } catch (...) {
-        arena::set_error("scan failed");
+        arena::set_error(ARENA_E_SCAN_FAILED);
         return false;
     }
 }

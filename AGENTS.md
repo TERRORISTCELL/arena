@@ -29,7 +29,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 
 ## Errors
 
-`arena_last_error()` after any `false` / zero return.
+`arena_last_error()` returns a thread-local 32-bit error code after any `false` / zero return. See [ERRORS.md](file:///home/iay/Belgeler/libs/arena/ERRORS.md) for details.
 
 ## Used by
 

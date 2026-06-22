@@ -89,8 +89,8 @@ ARENA_API uintptr_t arena_scan_signature(
     ArenaResolveKind resolve_kind,
     const ArenaResolveParams* params);
 
-/* Human-readable error for the last failed arena call on this thread. */
-ARENA_API const char* arena_last_error(void);
+/* Retrieves the last thread-local error code for this thread. */
+ARENA_API uint32_t arena_last_error(void);
 
 #ifdef __cplusplus
 }

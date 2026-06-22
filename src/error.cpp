@@ -2,33 +2,33 @@
 
 #include "arena.h"
 
-#include <string>
+
 
 namespace arena {
 namespace {
 
-thread_local std::string g_last_error;
+thread_local uint32_t g_last_error = 0;
 
 } // namespace
 
 void clear_error()
 {
-    g_last_error.clear();
+    g_last_error = 0;
 }
 
-void set_error(std::string_view message)
+void set_error(uint32_t code)
 {
-    g_last_error.assign(message.begin(), message.end());
+    g_last_error = code;
 }
 
-const char* last_error()
+uint32_t last_error()
 {
-    return g_last_error.c_str();
+    return g_last_error;
 }
 
 } // namespace arena
 
-extern "C" const char* arena_last_error(void)
+extern "C" uint32_t arena_last_error(void)
 {
     return arena::last_error();
 }

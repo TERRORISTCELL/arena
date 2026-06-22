@@ -1,4 +1,5 @@
 #include "arena.h"
+#include "../../src/errors.h"
 
 #include <windows.h>
 
@@ -18,10 +19,10 @@ void check(bool condition, std::string_view label)
     }
 
     ++g_failures;
-    const char* err = arena_last_error();
+    uint32_t err = arena_last_error();
     std::printf("[fail] %.*s", static_cast<int>(label.size()), label.data());
-    if (err && err[0] != '\0')
-        std::printf(" (%s)", err);
+    if (err != 0)
+        std::printf(" (0x%08X)", err);
     std::printf("\n");
 }
 
@@ -489,7 +490,7 @@ void test_read_write()
         !arena_read_safe(0, copied, 1),
         "arena_read_safe rejects null address");
     check(
-        std::string_view(arena_last_error()).find("user range") != std::string_view::npos,
+        arena_last_error() == ARENA_E_MEM_OUTSIDE_USER_RANGE,
         "arena_read_safe sets user-range error on null address");
 }
 
@@ -552,7 +553,7 @@ void test_scan()
         arena_scan_signature(image, sizeof(image), "FF FF FF FF", ARENA_RESOLVE_DIRECT_RVA, nullptr) == 0,
         "arena_scan_signature returns 0 when pattern is missing");
     check(
-        std::string_view(arena_last_error()).find("not found") != std::string_view::npos,
+        arena_last_error() == ARENA_E_SCAN_NOT_FOUND,
         "missing pattern sets not-found error");
 }
 
@@ -566,8 +567,9 @@ void test_spoof()
             static_cast<uintptr_t>(10),
             static_cast<uintptr_t>(32)),
         "spoof call fails before init");
+    const uint32_t err_code = arena_last_error();
     check(
-        std::string_view(arena_last_error()).find("not initialized") != std::string_view::npos,
+        err_code == ARENA_E_SPOOF_SLOT_NOT_INIT || err_code == ARENA_E_SPOOF_NOT_INIT,
         "spoof call before init sets not-initialized error");
 
     auto* module = reinterpret_cast<uint8_t*>(GetModuleHandleW(L"kernel32.dll"));

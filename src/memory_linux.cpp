@@ -1,5 +1,6 @@
 #include "arena.h"
 #include "error.hpp"
+#include "errors.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -81,13 +82,13 @@ bool region_allows_access(uintptr_t address, size_t size, bool require_write)
 
     // Check overflow
     if (size > UINTPTR_MAX - address) {
-        arena::set_error("address range overflows");
+        arena::set_error(ARENA_E_MEM_OVERFLOW);
         return false;
     }
 
     std::vector<MemoryRegion> regions;
     if (!get_memory_regions(regions)) {
-        arena::set_error("failed to read /proc/self/maps");
+        arena::set_error(ARENA_E_MEM_PROC_MAPS);
         return false;
     }
 
@@ -100,11 +101,11 @@ bool region_allows_access(uintptr_t address, size_t size, bool require_write)
         for (const auto& r : regions) {
             if (cursor >= r.start && cursor < r.end) {
                 if (!r.readable) {
-                    arena::set_error("memory region is not readable");
+                    arena::set_error(ARENA_E_MEM_NOT_READABLE);
                     return false;
                 }
                 if (require_write && !r.writable) {
-                    arena::set_error("memory region is not writable");
+                    arena::set_error(ARENA_E_MEM_NOT_WRITABLE);
                     return false;
                 }
                 cursor = r.end;
@@ -113,7 +114,7 @@ bool region_allows_access(uintptr_t address, size_t size, bool require_write)
             }
         }
         if (!found) {
-            arena::set_error("address is not committed / mapped");
+            arena::set_error(ARENA_E_MEM_NOT_COMMITTED);
             return false;
         }
     }
@@ -128,7 +129,7 @@ extern "C" bool arena_read_safe(uintptr_t address, void* out, size_t size)
     arena::clear_error();
 
     if (!out && size != 0) {
-        arena::set_error("invalid read output");
+        arena::set_error(ARENA_E_MEM_READ_OUT_INVALID);
         return false;
     }
 
@@ -149,7 +150,7 @@ extern "C" bool arena_write_safe(uintptr_t address, const void* data, size_t siz
     arena::clear_error();
 
     if (!data && size != 0) {
-        arena::set_error("invalid write input");
+        arena::set_error(ARENA_E_MEM_WRITE_IN_INVALID);
         return false;
     }
 

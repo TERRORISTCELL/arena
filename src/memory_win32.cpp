@@ -1,6 +1,7 @@
 #include "arena.h"
 
 #include "error.hpp"
+#include "errors.h"
 
 #include <windows.h>
 
@@ -39,7 +40,7 @@ bool protection_allows_write(DWORD protect)
 bool region_allows_access(uintptr_t address, size_t size, bool require_write)
 {
     if (!valid_user_address(address)) {
-        arena::set_error("address is outside user range");
+        arena::set_error(ARENA_E_MEM_OUTSIDE_USER_RANGE);
         return false;
     }
 
@@ -47,7 +48,7 @@ bool region_allows_access(uintptr_t address, size_t size, bool require_write)
         return true;
 
     if (size > kMaxUserAddress - address + 1) {
-        arena::set_error("address range overflows user range");
+        arena::set_error(ARENA_E_MEM_OVERFLOW_USER_RANGE);
         return false;
     }
 
@@ -57,41 +58,41 @@ bool region_allows_access(uintptr_t address, size_t size, bool require_write)
     while (cursor < end) {
         MEMORY_BASIC_INFORMATION mbi{};
         if (!VirtualQuery(reinterpret_cast<LPCVOID>(cursor), &mbi, sizeof(mbi))) {
-            arena::set_error("VirtualQuery failed");
+            arena::set_error(ARENA_E_MEM_VQUERY_FAILED);
             return false;
         }
 
         if (mbi.State != MEM_COMMIT) {
-            arena::set_error("memory is not committed");
+            arena::set_error(ARENA_E_MEM_NOT_COMMITTED);
             return false;
         }
 
         if ((mbi.Protect & PAGE_GUARD) || (mbi.Protect & PAGE_NOACCESS)) {
-            arena::set_error("memory is guarded or inaccessible");
+            arena::set_error(ARENA_E_MEM_GUARDED);
             return false;
         }
 
         if (!protection_allows_read(mbi.Protect)) {
-            arena::set_error("memory is not readable");
+            arena::set_error(ARENA_E_MEM_NOT_READABLE);
             return false;
         }
 
         if (require_write) {
             if (!protection_allows_write(mbi.Protect)) {
-                arena::set_error("memory is not writable");
+                arena::set_error(ARENA_E_MEM_NOT_WRITABLE);
                 return false;
             }
         }
 
         const uintptr_t region_base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
         if (mbi.RegionSize > kMaxUserAddress - region_base + 1) {
-            arena::set_error("memory region overflows user range");
+            arena::set_error(ARENA_E_MEM_OVERFLOW_USER_RANGE);
             return false;
         }
 
         const uintptr_t region_end = region_base + mbi.RegionSize;
         if (region_end <= cursor) {
-            arena::set_error("memory region did not advance");
+            arena::set_error(ARENA_E_MEM_NOT_ADVANCED);
             return false;
         }
 
@@ -108,7 +109,7 @@ extern "C" bool arena_read_safe(uintptr_t address, void* out, size_t size)
     arena::clear_error();
 
     if (!out && size != 0) {
-        arena::set_error("invalid read output");
+        arena::set_error(ARENA_E_MEM_READ_OUT_INVALID);
         return false;
     }
 
@@ -123,7 +124,7 @@ extern "C" bool arena_read_safe(uintptr_t address, void* out, size_t size)
             size,
             &bytes_read) ||
         bytes_read != size) {
-        arena::set_error("ReadProcessMemory failed");
+        arena::set_error(ARENA_E_MEM_READ_PROC_FAILED);
         return false;
     }
 
@@ -140,7 +141,7 @@ extern "C" bool arena_write_safe(uintptr_t address, const void* data, size_t siz
     arena::clear_error();
 
     if (!data && size != 0) {
-        arena::set_error("invalid write input");
+        arena::set_error(ARENA_E_MEM_WRITE_IN_INVALID);
         return false;
     }
 
@@ -155,7 +156,7 @@ extern "C" bool arena_write_safe(uintptr_t address, const void* data, size_t siz
             size,
             &bytes_written) ||
         bytes_written != size) {
-        arena::set_error("WriteProcessMemory failed");
+        arena::set_error(ARENA_E_MEM_WRITE_PROC_FAILED);
         return false;
     }
 
